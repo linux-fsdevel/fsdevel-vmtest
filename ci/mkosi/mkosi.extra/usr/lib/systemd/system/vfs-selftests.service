@@ -1,0 +1,14 @@
+[Unit]
+Description=VFS Selftest Runner (all targets)
+After=multi-user.target
+SuccessAction=exit
+SuccessActionExitStatus=123
+FailureAction=exit
+FailureActionExitStatus=1
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+RuntimeMaxSec=2h
+IgnoreSIGPIPE=no
+ExecStart=/usr/lib/vfs-ci/run-selftests.sh
