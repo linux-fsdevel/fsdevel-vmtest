@@ -1,0 +1,84 @@
+name: keepalive
+
+# GitHub auto-disables `schedule`-triggered workflows after 60 days without
+# repository activity (i.e. no new commits). When that happened here, the
+# ml2pr bridge and the kernel.org sync silently stopped and the PR queue
+# froze for ~12 days. This workflow keeps the repository active so the
+# scheduled ml2pr / sync-vfs workflows are never auto-disabled.
+#
+# Two independent mechanisms:
+#   1. PREVENT: if the most recent commit is older than the threshold, push a
+#      tiny commit to reset the 60-day timer. Real commits during normal
+#      development reset it too, so this only fires during quiet periods.
+#   2. RECOVER: if ml2pr / sync-vfs are currently in the `disabled_inactivity`
+#      state, re-enable them (e.g. on the first manual run, to recover from an
+#      outage that already happened). Manually disabled workflows are left
+#      untouched.
+
+on:
+  schedule:
+    # Twice weekly, off the hour (scheduled runs on :00 are more likely to be
+    # dropped under load). Two checks/week keeps a wide margin even if several
+    # consecutive runs are skipped.
+    - cron: '17 5 * * 1'   # Mondays   05:17 UTC
+    - cron: '17 5 * * 4'   # Thursdays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write   # push the keepalive commit
+  actions: write    # re-enable inactivity-disabled scheduled workflows
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Recover any inactivity-disabled scheduled workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for wf in bridge.yml sync.yml; do
+            state=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}" --jq .state)
+            if [ "${state}" = "disabled_inactivity" ]; then
+              echo "::notice::Re-enabling ${wf} (was ${state})"
+              gh workflow enable "${wf}"
+            else
+              echo "${wf}: state=${state} (leaving as-is)"
+            fi
+          done
+
+      - name: Refresh repository activity if idle
+        env:
+          KEEPALIVE_THRESHOLD_DAYS: 45
+        run: |
+          set -euo pipefail
+
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          age=$(( (now - last) / 86400 ))
+          echo "Most recent commit is ${age} day(s) old (threshold ${KEEPALIVE_THRESHOLD_DAYS})."
+
+          if [ "${age}" -lt "${KEEPALIVE_THRESHOLD_DAYS}" ]; then
+            echo "Repository is active; no keepalive commit needed."
+            exit 0
+          fi
+
+          echo "Repository idle; pushing keepalive commit to reset the 60-day timer."
+          git config user.name  "ml2pr"
+          git config user.email "ml2pr@linux-fsdevel"
+          date -u +"last keepalive: %Y-%m-%dT%H:%M:%SZ" > .github/keepalive
+          git add .github/keepalive
+          if git diff --cached --quiet; then
+            echo "Nothing staged; skipping commit."
+            exit 0
+          fi
+          git commit --no-gpg-sign \
+            -m "ci: keepalive to prevent scheduled-workflow auto-disable [skip ci]"
+          git push
