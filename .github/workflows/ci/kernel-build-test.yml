@@ -86,11 +86,18 @@ jobs:
             cp -av ci/mkosi/mkosi.conf.d/99-vfs-ovl.conf "${MKOSI_KERNEL}/mkosi.conf.d/"
           fi
 
+          # mkosi.local.conf is parsed before mkosi.conf.d/, and [Match] is
+          # evaluated incrementally, so the kernel build source must be declared
+          # here (not in 99-vfs.conf) for mkosi-kernel's 15-linux.conf
+          # "[Match] BuildSources=kernel" to fire and apply its Linux= override.
+          # Otherwise mkosi version-sorts /usr/lib/modules and boots the (newer)
+          # distro kernel instead of the built one.
           cat > "${MKOSI_KERNEL}/mkosi.local.conf" <<EOF
           [Distribution]
           Distribution=${{ inputs.distro }}
 
           [Build]
+          BuildSources=$GITHUB_WORKSPACE:kernel
           WorkspaceDirectory=$TMPDIR
           PackageCacheDirectory=$TMPDIR/cache
           EOF
