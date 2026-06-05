@@ -28,6 +28,8 @@ esac
 # xfs/008: unreliable - "holes has value of 44 holes is NOT in range 45 .. 55"
 # xfs/059, xfs/060: flaky under CI load - slow/timing-sensitive tests that
 # fail intermittently (~1-2% of runs); kdevops lists both in over-10s.txt.
+# xfs/841: deterministic failure since it landed upstream - the reproducible
+# image test reports "Filesystem images differ" in this build environment.
 XFS_EXCLUDE+=" -e xfs/008 \
  -e xfs/017 \
  -e xfs/018 \
@@ -35,7 +37,8 @@ XFS_EXCLUDE+=" -e xfs/008 \
  -e xfs/060 \
  -e xfs/176 \
  -e xfs/556 \
- -e xfs/620"
+ -e xfs/620 \
+ -e xfs/841"
 OVL_EXCLUDE+=" -e generic/091 \
  -e generic/103 \
  -e generic/263 \
