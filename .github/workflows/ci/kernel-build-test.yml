@@ -33,7 +33,31 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: systemd/mkosi@56d5ed4247deb3d0b11f7a6aec5a1a9f580ccde5
+      - uses: systemd/mkosi@9a28ad20bbea61894ea7b971d318a71f4374cf3b
+
+      # Free up disk space and back mkosi's workspace with a large, sparse,
+      # zstd-compressed btrfs loopback so the kernel build + 15G image don't
+      # exhaust the runner's small root filesystem. Compression lets a 100G
+      # logical fs fit in the ~20-30G of real free space. Mirrors systemd's
+      # own CI (.github/workflows/mkosi.yml). Move-then-delete in the
+      # background so the job doesn't block on the slow rm.
+      - name: Free disk space
+        run: |
+          sudo mv /usr/local /usr/local.trash
+          sudo mv /opt/hostedtoolcache /opt/hostedtoolcache.trash
+          sudo systemd-run rm -rf /usr/local.trash /opt/hostedtoolcache.trash
+
+      - name: Maximize build space
+        run: |
+          truncate --size=100G btrfs.raw
+          mkfs.btrfs btrfs.raw
+          sudo mkdir -p /mnt/mkosi
+          LOOP="$(sudo losetup --find --show --direct-io=on btrfs.raw)"
+          rm -f btrfs.raw
+          sudo mount "$LOOP" /mnt/mkosi --options compress=zstd:1,user_subvol_rm_allowed,noatime,discard=async,space_cache=v2
+          sudo chown "$(id -u):$(id -g)" /mnt/mkosi
+          mkdir -p /mnt/mkosi/tmp
+          echo "TMPDIR=/mnt/mkosi/tmp" >>"$GITHUB_ENV"
 
       - name: Clone mkosi-kernel
         run: git clone --depth=1 https://github.com/DaanDeMeyer/mkosi-kernel.git "$MKOSI_KERNEL"
@@ -65,6 +89,10 @@ jobs:
           cat > "${MKOSI_KERNEL}/mkosi.local.conf" <<EOF
           [Distribution]
           Distribution=${{ inputs.distro }}
+
+          [Build]
+          WorkspaceDirectory=$TMPDIR
+          PackageCacheDirectory=$TMPDIR/cache
           EOF
           mkosi --directory="${MKOSI_KERNEL}" genkey
 
